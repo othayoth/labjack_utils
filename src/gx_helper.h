@@ -11,6 +11,7 @@
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
 #include "types.h"
+#include "implot.h"
 
 
 typedef struct gx_context
@@ -72,6 +73,7 @@ void gx_imgui_init(gx_context *context)
     // ************* Dear Imgui ********************//
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
+    ImPlotContext *implotCtx = ImPlot::CreateContext();
 
     ImGuiIO &io = ImGui::GetIO();
     (void)io;
@@ -163,7 +165,7 @@ static void unbind_pbo()
 
 void render_initialize_target(gx_context *window)
 {
-    GLFWwindow *render_target = gx_glfw_init_render_target(3, 3, window->width, window->height, "Cbot", window->glsl_version);
+    GLFWwindow *render_target = gx_glfw_init_render_target(3, 3, window->width, window->height, "labjack_utils", window->glsl_version);
     gx_init(window, render_target);
     gx_imgui_init(window);
 }
@@ -208,6 +210,7 @@ void gx_cleanup(gx_context *window)
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();
     ImGui::DestroyContext();
+    // ImPlot::DestroyContext();
     glfwDestroyWindow(window->render_target);
     glfwTerminate();
 }

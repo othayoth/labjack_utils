@@ -10,8 +10,10 @@
 #include "utility.h"
 #include <chrono>
 #include <string.h>
-#include "imgui_internal.h"
 #include "imgui.h"
+#include "imgui_internal.h"
+#include "implot.h"
+
 #include <stdio.h>
 #include <GLFW/glfw3.h> // Will drag system OpenGL headers
 #include <random>
@@ -19,6 +21,14 @@
 
 #include "spdlog/spdlog.h"
 #include "spdlog/sinks/basic_file_sink.h"
+
+
+#include "labjack/LJM_Utilities.h"
+int handle, err;
+const char * identifier = "ANY";
+double state;
+struct timespec spec;
+long int us; // Microseconds
 
 const float button_width = 400.0f;
 
@@ -33,6 +43,57 @@ std::string CurrentTimeStr()
 
 
 auto logger = spdlog::basic_logger_mt("basic_logger", "logs/basic_log.txt");
+
+
+// utility structure for realtime plot
+struct ScrollingBuffer {
+    int MaxSize;
+    int Offset;
+    ImVector<ImVec2> Data;
+    ScrollingBuffer(int max_size = 2000) {
+        MaxSize = max_size;
+        Offset  = 0;
+        Data.reserve(MaxSize);
+    }
+    void AddPoint(float x, float y) {
+        if (Data.size() < MaxSize)
+            Data.push_back(ImVec2(x,y));
+        else {
+            Data[Offset] = ImVec2(x,y);
+            Offset =  (Offset + 1) % MaxSize;
+        }
+    }
+    void Erase() {
+        if (Data.size() > 0) {
+            Data.shrink(0);
+            Offset  = 0;
+        }
+    }
+};
+
+struct RollingBuffer {
+    float Span;
+    ImVector<ImVec2> Data;
+    RollingBuffer() {
+        Span = 10.0f;
+        Data.reserve(2000);
+    }
+    void AddPoint(float x, float y) {
+        float xmod = fmodf(x, Span);
+        if (!Data.empty() && xmod < Data.back().x)
+            Data.shrink(0);
+        Data.push_back(ImVec2(xmod, y));
+    }
+};
+
+
+static ScrollingBuffer sdata1;
+static RollingBuffer   rdata1;
+static float history = 10.0f;
+long int t_start = 0;
+                        
+
+bool show_data = false;
 
 // Main code
 int main(int argc, const char** argv)
@@ -81,17 +142,115 @@ int main(int argc, const char** argv)
         create_new_frame();
         
       
-                // dock:fsm
+        // dock:fsm
         {
 
-            ImGui::Begin("state machine");
+            ImGui::Begin("setup");
+
+            if(ImGui::Button("connect to T7"))
+            {
+                // Open the first found LabJack T7
+                err = LJM_Open(LJM_dtT7, LJM_ctUSB, identifier, &handle);
+                if (err != LJME_NOERROR) {
+                    printf("Error opening LabJack T7.\n");
+                    std::cout << "Error code: " << err <<std::endl;
+                    LJM_eWriteName(handle, "FIO0_DIRECTION", 0); // 0 for input
+                }
+                else
+                    printf("LabJack T7 opened successfully.\n");
+
+            }
             
+
+            if(ImGui::Button( show_data?"stop polling":"poll data"))
+            {
+                if (show_data)
+                {
+                    show_data = false;
+                }
+                else
+                {
+                    sdata1.Erase();
+                    rdata1.Data.clear();
+             
+                    show_data = true;
+                    clock_gettime(CLOCK_REALTIME, &spec);
+                    t_start = spec.tv_sec;
+                    
+                }
+            }
+
+  
             
-           
+
             ImGui::End();
+            
+
+        }
+        
+        {
+            ImGui::Begin("plot");
+
+            
+                if(show_data)
+                {
+                        
+                   
+                        // Read the digital state of FIO0
+                        LJM_eReadName(handle, "FIO0", &state);
+
+                        // Get the current time with millisecond precision
+                        clock_gettime(CLOCK_REALTIME, &spec);
+                        us = round(spec.tv_nsec / 1.0e3); // Convert nanoseconds to microseconds
+
+                        // Print the state with timestamp
+                        // printf("Time: %f, FIO0 State: %f\n", spec.tv_sec*1e-6+us, state);
+                        // printf("Time: %ld.%06ld, FIO0 State: %f\n", (spec.tv_sec - t_start), us, state);
+
+                        // Sleep for a bit before the next poll
+                        // LJM_Sleep(1000); // Sleep for 1000 milliseconds (1 second)
+
+
+                        sdata1.AddPoint((spec.tv_sec-t_start)+us*1e-6, state);
+                        rdata1.AddPoint((spec.tv_sec-t_start)+us*1e-6, state);
+                        
+                        ImGui::SliderFloat("History",&history,1,30,"%.1f s");
+                        rdata1.Span = history;
+                        
+                        static ImPlotAxisFlags flags = ImPlotAxisFlags_NoTickLabels;
+
+                        if (ImPlot::BeginPlot("##Scrolling", ImVec2(-1,150))) {
+                            ImPlot::SetupAxes(nullptr, nullptr, flags, flags);
+                            ImPlot::SetupAxisLimits(ImAxis_X1,(spec.tv_sec-t_start)+us*1e-6 - history, (spec.tv_sec-t_start)+us*1e-6, ImGuiCond_Always);
+                            ImPlot::SetupAxisLimits(ImAxis_Y1,0,1);
+                            ImPlot::SetNextFillStyle(IMPLOT_AUTO_COL,0.5f);
+                            ImPlot::PlotShaded("Pulse", &sdata1.Data[0].x, &sdata1.Data[0].y, sdata1.Data.size(), -INFINITY, 0, sdata1.Offset, 2 * sizeof(float));
+                            ImPlot::EndPlot();
+                        }
+
+                        if (ImPlot::BeginPlot("##Rolling", ImVec2(-1,150))) {
+                            ImPlot::SetupAxes(NULL, NULL, flags, flags);
+                            ImPlot::SetupAxisLimits(ImAxis_X1,0,history, ImGuiCond_Always);
+                            ImPlot::SetupAxisLimits(ImAxis_Y1,0,1);
+                            ImPlot::PlotLine("Pulse", &rdata1.Data[0].x, &rdata1.Data[0].y, rdata1.Data.size(), 0, 0, 2 * sizeof(float));
+                            ImPlot::EndPlot();
+                        }
+
+
+                    
+
+
+                }
+           
+
+
+            
+            
+            ImGui::End();
+
         }
 
-        
+
         render_a_frame(window);
         logger->info("rendered a frame");
         logger->flush();
