@@ -38,8 +38,11 @@ std::string CurrentTimeStr()
 #define CURRENT_TIME_STR CurrentTimeStr().c_str()
 
 
-auto logger = spdlog::basic_logger_mt("basic_logger", "logs/basic_log.txt");
-
+// auto logger = spdlog::basic_logger_mt("basic_logger", "logs/basic_log.txt");
+// spdlog::set_pattern("[%H_%M_%S_%z] [%n] [%^---%L---%$] [thread %t] %v");
+// spdlog::set_pattern("[%Y_%m_%d_%H_%M_%S_%f_%z] [%n] [%^---%L---%$] [thread %t] %v");
+// spdlog::init_thread_pool(8192, 1);
+auto async_logger = spdlog::basic_logger_mt<spdlog::async_factory>("async_file_logger", "logs/async_log.txt");
 
 // utility structure for realtime plot
 struct ScrollingBuffer {
@@ -92,6 +95,8 @@ long int t_start = 0;
 bool show_data = false;
 
 LabJackState lj_state;
+LabJackStreamData lj_data;
+LabJackStreamData lj_local;
 
 // Main code
 int main(int argc, const char** argv)
@@ -99,7 +104,7 @@ int main(int argc, const char** argv)
     printf("started cbot\n");
     printf(CURRENT_TIME_STR);
     printf("\n");
-    logger->info("starting cbot");
+    async_logger->info("starting cbot");
 
    
 
@@ -157,14 +162,39 @@ int main(int argc, const char** argv)
                 // }
 
                 if (lj_state.is_connected)  {
+                    async_logger->info("disconnected from labjack");
                     close_labjack(&lj_state);
                 }
                 else                {
                     printf("connecting to labjack\n");
+                    async_logger->info("connected to labjack");
                     open_labjack(&lj_state);
+                }
+
+                
+            }
+
+            if(ImGui::Button(lj_state.stream_on? "stop stream": "start stream"))
+            {
+                if (lj_state.stream_on) {
+                    stop_streaming(&lj_state,&lj_data);
+                    lj_state.stream_on = false;
+                    lj_state.lj_thread->join();
+                    lj_state.log_thread->join();
+                    async_logger->info("stopped streaming");
+
+                }
+                else {
+                    lj_state.stream_on = true;
+                    start_streaming(&lj_state,&lj_data);
+                    lj_state.lj_thread = new std::thread(lj_stream_thread, &lj_state, &lj_data);
+                    lj_state.log_thread = new std::thread(gui_log_thread, &lj_state, &lj_data, async_logger);
+
                 }
             }
             
+            if(!lj_state.stream_in_queue.empty())
+                LabJackStreamData in_data = lj_state.stream_in_queue.pop();
 
             if(ImGui::Button( show_data?"stop polling":"poll data"))
             {
@@ -254,8 +284,7 @@ int main(int argc, const char** argv)
 
 
         render_a_frame(window);
-        logger->info("rendered a frame");
-        logger->flush();
+        async_logger->flush();
     }
 
     
