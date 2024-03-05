@@ -19,13 +19,9 @@
 #include <random>
 #include "math.h"
 
-#include "spdlog/spdlog.h"
-#include "spdlog/sinks/basic_file_sink.h"
+#include "log_helper.h"
 
-
-#include "labjack/LJM_Utilities.h"
 int handle, err;
-const char * identifier = "ANY";
 double state;
 struct timespec spec;
 long int us; // Microseconds
@@ -95,6 +91,8 @@ long int t_start = 0;
 
 bool show_data = false;
 
+LabJackState lj_state;
+
 // Main code
 int main(int argc, const char** argv)
 {
@@ -147,29 +145,33 @@ int main(int argc, const char** argv)
 
             ImGui::Begin("setup");
 
-            if(ImGui::Button("connect to T7"))
+            if(ImGui::Button(lj_state.is_connected? "disconnect T7": "connect to T7"))
             {
-                // Open the first found LabJack T7
-                err = LJM_Open(LJM_dtT7, LJM_ctUSB, identifier, &handle);
-                if (err != LJME_NOERROR) {
-                    printf("Error opening LabJack T7.\n");
-                    std::cout << "Error code: " << err <<std::endl;
-                    LJM_eWriteName(handle, "FIO0_DIRECTION", 0); // 0 for input
-                }
-                else
-                    printf("LabJack T7 opened successfully.\n");
 
+                // int er= LJM_Open(LJM_dtT7, LJM_ctETHERNET, "ANY", &handle);
+                // if(er!=LJME_NOERROR){
+                //     printf("Failed to connect to LabJack\n");
+                // }
+                // else    {
+                //     printf("Connected to LabJack\n");
+                // }
+
+                if (lj_state.is_connected)  {
+                    close_labjack(&lj_state);
+                }
+                else                {
+                    printf("connecting to labjack\n");
+                    open_labjack(&lj_state);
+                }
             }
             
 
             if(ImGui::Button( show_data?"stop polling":"poll data"))
             {
-                if (show_data)
-                {
+                if (show_data)  {
                     show_data = false;
                 }
-                else
-                {
+                else            {
                     sdata1.Erase();
                     rdata1.Data.clear();
              
