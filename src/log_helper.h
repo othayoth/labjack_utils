@@ -9,9 +9,14 @@
 #include "spdlog/async.h"
 #include "spdlog/sinks/basic_file_sink.h"
 
+
 const char * identifier = "ANY";
+bool clean_exit = false;
 
 // using namespace spdlog;
+
+std::thread* lj_thread;
+std::thread* log_thread;
 
 // data structure to stream data
 struct LabJackStreamData{
@@ -49,6 +54,8 @@ struct LabJackState{
 
 
 
+void lj_stream_thread(LabJackState* lj_state, LabJackStreamData* lj_stream);
+void gui_log_thread(LabJackState* lj_state, LabJackStreamData *lj_stream, std::shared_ptr<spdlog::logger> logger);
 
 
 
@@ -81,7 +88,7 @@ void close_labjack(LabJackState* lj_state)      {
     
 }
 
-void start_streaming(LabJackState* lj_state, LabJackStreamData* lj_stream)    {
+void start_streaming(LabJackState* lj_state, LabJackStreamData* lj_stream, std::shared_ptr<spdlog::logger> camera_logger)    {
 
     // get channel list and convert them to addresses
     lj_state->scan_list_addresses = (int*)malloc(lj_state->num_channels*sizeof(int));
@@ -97,17 +104,30 @@ void start_streaming(LabJackState* lj_state, LabJackStreamData* lj_stream)    {
     }
     else        {
         lj_state->stream_on=true;
+        lj_thread = new std::thread(lj_stream_thread, lj_state, lj_stream);
+        log_thread = new std::thread(gui_log_thread, lj_state, lj_stream, camera_logger);
         printf("Started streaming\n");
+        clean_exit = false;
     }
 }
 
 void stop_streaming(LabJackState* lj_state, LabJackStreamData* lj_stream)     {
+    
+    lj_state->stream_on = false;
+
+    while(clean_exit==false){
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    clean_exit = false;
+    lj_thread->join();
+    log_thread->join();
+
     lj_state->err = LJM_eStreamStop(lj_state->handle);
     if(lj_state->err!=LJME_NOERROR)   {
         printf("Failed to stop streaming\n");
         return;
     }
-    else        {
+    else        {       
         lj_state->stream_on=false;
         printf("Stopped streaming\n");
     }
@@ -117,6 +137,7 @@ void stop_streaming(LabJackState* lj_state, LabJackStreamData* lj_stream)     {
 
 void lj_stream_thread(LabJackState* lj_state, LabJackStreamData* lj_stream)
 {
+    printf("starting lj_stream_thread\n");
     lj_stream->us_scan_start = LJM_GetHostTick();
     while(lj_state->stream_on)
     {
@@ -125,14 +146,19 @@ void lj_stream_thread(LabJackState* lj_state, LabJackStreamData* lj_stream)
         lj_state->stream_in_queue.push(*lj_stream);
     }
 
+
     free(lj_state->scan_list_addresses);
     free(lj_stream->data);
 
+    clean_exit = true;
+
+    
 }
 
 void gui_log_thread(LabJackState* lj_state, LabJackStreamData *lj_stream, std::shared_ptr<spdlog::logger> logger)
 {
 
+    printf("starting gui_log_thread\n");
     double last_data = 0;
     while (lj_state->log_on) {
         if (!lj_state->stream_in_queue.empty()) {

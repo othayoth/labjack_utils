@@ -42,7 +42,8 @@ std::string CurrentTimeStr()
 // spdlog::set_pattern("[%H_%M_%S_%z] [%n] [%^---%L---%$] [thread %t] %v");
 // spdlog::set_pattern("[%Y_%m_%d_%H_%M_%S_%f_%z] [%n] [%^---%L---%$] [thread %t] %v");
 // spdlog::init_thread_pool(8192, 1);
-auto async_logger = spdlog::basic_logger_mt<spdlog::async_factory>("async_file_logger", "logs/async_log.txt");
+auto camera_logger = spdlog::basic_logger_mt<spdlog::async_factory>("camera_logger", "logs/async_log.txt");
+auto cbot_logger = spdlog::basic_logger_mt<spdlog::async_factory>("cbot_logger", "logs/async_log.txt");
 
 // utility structure for realtime plot
 struct ScrollingBuffer {
@@ -104,7 +105,7 @@ int main(int argc, const char** argv)
     printf("started cbot\n");
     printf(CURRENT_TIME_STR);
     printf("\n");
-    async_logger->info("starting cbot");
+    cbot_logger->info("starting cbot");
 
    
 
@@ -162,12 +163,12 @@ int main(int argc, const char** argv)
                 // }
 
                 if (lj_state.is_connected)  {
-                    async_logger->info("disconnected from labjack");
+                    cbot_logger->info("disconnected from labjack");
                     close_labjack(&lj_state);
                 }
                 else                {
                     printf("connecting to labjack\n");
-                    async_logger->info("connected to labjack");
+                    cbot_logger->info("connected to labjack");
                     open_labjack(&lj_state);
                 }
 
@@ -177,19 +178,15 @@ int main(int argc, const char** argv)
             if(ImGui::Button(lj_state.stream_on? "stop stream": "start stream"))
             {
                 if (lj_state.stream_on) {
-                    stop_streaming(&lj_state,&lj_data);
                     lj_state.stream_on = false;
-                    lj_state.lj_thread->join();
-                    lj_state.log_thread->join();
-                    async_logger->info("stopped streaming");
+                    lj_state.log_on = false;
+                    stop_streaming(&lj_state,&lj_data);                    
+                    
 
                 }
                 else {
                     lj_state.stream_on = true;
-                    start_streaming(&lj_state,&lj_data);
-                    lj_state.lj_thread = new std::thread(lj_stream_thread, &lj_state, &lj_data);
-                    lj_state.log_thread = new std::thread(gui_log_thread, &lj_state, &lj_data, async_logger);
-
+                    start_streaming(&lj_state,&lj_data,camera_logger);                    
                 }
             }
             
@@ -284,7 +281,8 @@ int main(int argc, const char** argv)
 
 
         render_a_frame(window);
-        async_logger->flush();
+        cbot_logger->flush();
+        // camera_logger->flush();
     }
 
     
