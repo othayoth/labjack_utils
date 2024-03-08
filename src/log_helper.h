@@ -26,7 +26,7 @@ struct LabJackStreamData{
     int lj_scan_backlog=0;
     uint64_t us_tick=0;
     uint64_t us_scan_start=0;
-    uint64_t counter=0;
+    uint32_t counter=0;
     double* data;    
 };
 
@@ -42,10 +42,10 @@ struct LabJackState{
     std::thread* log_thread;
     
     // scan pararmeters
-    double scan_rate = 10000;
+    double scan_rate = 5000;
     int scans_per_read = (int)(scan_rate/2);
     enum {num_channels = 1};
-    const char * channels[num_channels] = {"FIO0"};    
+    const char * channels[num_channels] = {"DIO0_EF_READ_A_AND_RESET"};    
     int* scan_list_addresses;
     unsigned int scan_data_size = num_channels*scans_per_read;       
     TSQueue<LabJackStreamData> stream_in_queue;
@@ -69,7 +69,20 @@ void open_labjack(LabJackState* lj_state)       {
     else        {
         lj_state->is_connected=true;
         printf("Opened connection to LabJack\n");        
+
+        lj_state->err = LJM_eWriteName(lj_state->handle, "DIO0_EF_ENABLE", 0);    
+        if(lj_state->err==LJME_NOERROR)  {printf("disabled DIO0_EF\n");}
+            
+        lj_state->err = LJM_eWriteName(lj_state->handle, "DIO0_EF_INDEX", 8);
+        if(lj_state->err==LJME_NOERROR)  {printf("set EF_INDEX to read counters\n");}
+        
+        lj_state->err = LJM_eWriteName(lj_state->handle, "DIO0_EF_ENABLE", 1);
+        if(lj_state->err==LJME_NOERROR)  {printf("enabled DIO0_EF\n");}
+        
+    
     }
+
+    // setup FIO as interrupt counter
     
 }
 
@@ -132,6 +145,8 @@ void stop_streaming(LabJackState* lj_state, LabJackStreamData* lj_stream)     {
         printf("Stopped streaming\n");
     }
 
+    lj_stream->counter = 0;
+
     
 }
 
@@ -155,6 +170,7 @@ void lj_stream_thread(LabJackState* lj_state, LabJackStreamData* lj_stream)
     
 }
 
+
 void gui_log_thread(LabJackState* lj_state, LabJackStreamData *lj_stream, std::shared_ptr<spdlog::logger> logger)
 {
 
@@ -166,9 +182,10 @@ void gui_log_thread(LabJackState* lj_state, LabJackStreamData *lj_stream, std::s
             LabJackStreamData in_data = lj_state->stream_in_queue.pop();
         
             for (int i = 0; i < lj_state->scan_data_size; i++) {
-                if (in_data.data[i] != last_data && in_data.data[i] != 0) {
-                    lj_stream->counter++;                
-                    logger->info("tick: {0}, data: {1}, pulse_count: {2}", in_data.us_tick, in_data.data[i],lj_stream->counter);
+                
+                if (in_data.data[i] != last_data) {
+                    lj_stream->counter++;  
+                    logger->info("tick: {0}, in_data:{1}, frames_in: {2}", in_data.us_tick, in_data.data[i], lj_stream->counter);              
                     
                 }
             last_data = in_data.data[i];

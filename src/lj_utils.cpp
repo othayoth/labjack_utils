@@ -109,8 +109,8 @@ int main(int argc, const char** argv)
 
    
 
-    u32 win_width = 1920;
-    u32 win_height = 1080;
+    u32 win_width = 640;
+    u32 win_height = 320;
     // window 
     gx_context *window = (gx_context *)malloc(sizeof(gx_context));
     *window = (gx_context){
@@ -154,14 +154,7 @@ int main(int argc, const char** argv)
             if(ImGui::Button(lj_state.is_connected? "disconnect T7": "connect to T7"))
             {
 
-                // int er= LJM_Open(LJM_dtT7, LJM_ctETHERNET, "ANY", &handle);
-                // if(er!=LJME_NOERROR){
-                //     printf("Failed to connect to LabJack\n");
-                // }
-                // else    {
-                //     printf("Connected to LabJack\n");
-                // }
-
+               
                 if (lj_state.is_connected)  {
                     cbot_logger->info("disconnected from labjack");
                     close_labjack(&lj_state);
@@ -217,68 +210,7 @@ int main(int argc, const char** argv)
 
         }
         
-        {
-            ImGui::Begin("plot");
-
-            
-                if(show_data)
-                {
-                        
-                   
-                        // Read the digital state of FIO0
-                        LJM_eReadName(handle, "FIO0", &state);
-
-                        // Get the current time with millisecond precision
-                        clock_gettime(CLOCK_REALTIME, &spec);
-                        us = round(spec.tv_nsec / 1.0e3); // Convert nanoseconds to microseconds
-
-                        // Print the state with timestamp
-                        // printf("Time: %f, FIO0 State: %f\n", spec.tv_sec*1e-6+us, state);
-                        // printf("Time: %ld.%06ld, FIO0 State: %f\n", (spec.tv_sec - t_start), us, state);
-
-                        // Sleep for a bit before the next poll
-                        // LJM_Sleep(1000); // Sleep for 1000 milliseconds (1 second)
-
-
-                        sdata1.AddPoint((spec.tv_sec-t_start)+us*1e-6, state);
-                        rdata1.AddPoint((spec.tv_sec-t_start)+us*1e-6, state);
-                        
-                        ImGui::SliderFloat("History",&history,1,30,"%.1f s");
-                        rdata1.Span = history;
-                        
-                        static ImPlotAxisFlags flags = ImPlotAxisFlags_NoTickLabels;
-
-                        if (ImPlot::BeginPlot("##Scrolling", ImVec2(-1,150))) {
-                            ImPlot::SetupAxes(nullptr, nullptr, flags, flags);
-                            ImPlot::SetupAxisLimits(ImAxis_X1,(spec.tv_sec-t_start)+us*1e-6 - history, (spec.tv_sec-t_start)+us*1e-6, ImGuiCond_Always);
-                            ImPlot::SetupAxisLimits(ImAxis_Y1,0,1);
-                            ImPlot::SetNextFillStyle(IMPLOT_AUTO_COL,0.5f);
-                            ImPlot::PlotShaded("Pulse", &sdata1.Data[0].x, &sdata1.Data[0].y, sdata1.Data.size(), -INFINITY, 0, sdata1.Offset, 2 * sizeof(float));
-                            ImPlot::EndPlot();
-                        }
-
-                        if (ImPlot::BeginPlot("##Rolling", ImVec2(-1,150))) {
-                            ImPlot::SetupAxes(NULL, NULL, flags, flags);
-                            ImPlot::SetupAxisLimits(ImAxis_X1,0,history, ImGuiCond_Always);
-                            ImPlot::SetupAxisLimits(ImAxis_Y1,0,1);
-                            ImPlot::PlotLine("Pulse", &rdata1.Data[0].x, &rdata1.Data[0].y, rdata1.Data.size(), 0, 0, 2 * sizeof(float));
-                            ImPlot::EndPlot();
-                        }
-
-
-                    
-
-
-                }
-           
-
-
-            
-            
-            ImGui::End();
-
-        }
-
+       
 
         render_a_frame(window);
         cbot_logger->flush();
