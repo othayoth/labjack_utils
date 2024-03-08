@@ -186,21 +186,7 @@ int main(int argc, const char** argv)
             if(!lj_state.stream_in_queue.empty())
                 LabJackStreamData in_data = lj_state.stream_in_queue.pop();
 
-            if(ImGui::Button( show_data?"stop polling":"poll data"))
-            {
-                if (show_data)  {
-                    show_data = false;
-                }
-                else            {
-                    sdata1.Erase();
-                    rdata1.Data.clear();
-             
-                    show_data = true;
-                    clock_gettime(CLOCK_REALTIME, &spec);
-                    t_start = spec.tv_sec;
-                    
-                }
-            }
+          
 
   
             
