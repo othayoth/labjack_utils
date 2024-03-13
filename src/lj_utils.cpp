@@ -45,59 +45,14 @@ std::string CurrentTimeStr()
 auto camera_logger = spdlog::basic_logger_mt<spdlog::async_factory>("camera_logger", "logs/async_log.txt");
 auto cbot_logger = spdlog::basic_logger_mt<spdlog::async_factory>("cbot_logger", "logs/async_log.txt");
 
-// utility structure for realtime plot
-struct ScrollingBuffer {
-    int MaxSize;
-    int Offset;
-    ImVector<ImVec2> Data;
-    ScrollingBuffer(int max_size = 2000) {
-        MaxSize = max_size;
-        Offset  = 0;
-        Data.reserve(MaxSize);
-    }
-    void AddPoint(float x, float y) {
-        if (Data.size() < MaxSize)
-            Data.push_back(ImVec2(x,y));
-        else {
-            Data[Offset] = ImVec2(x,y);
-            Offset =  (Offset + 1) % MaxSize;
-        }
-    }
-    void Erase() {
-        if (Data.size() > 0) {
-            Data.shrink(0);
-            Offset  = 0;
-        }
-    }
-};
-
-struct RollingBuffer {
-    float Span;
-    ImVector<ImVec2> Data;
-    RollingBuffer() {
-        Span = 10.0f;
-        Data.reserve(2000);
-    }
-    void AddPoint(float x, float y) {
-        float xmod = fmodf(x, Span);
-        if (!Data.empty() && xmod < Data.back().x)
-            Data.shrink(0);
-        Data.push_back(ImVec2(xmod, y));
-    }
-};
-
-
-static ScrollingBuffer sdata1;
-static RollingBuffer   rdata1;
-static float history = 10.0f;
-long int t_start = 0;
                         
 
 bool show_data = false;
 
 LabJackState lj_state;
-LabJackStreamData lj_data;
-LabJackStreamData lj_local;
+Pulse pulse;
+float duty_cycle = pulse.dutyCycle;
+float fps = pulse.frequency;
 
 // Main code
 int main(int argc, const char** argv)
@@ -153,7 +108,6 @@ int main(int argc, const char** argv)
 
             if(ImGui::Button(lj_state.is_connected? "disconnect T7": "connect to T7"))
             {
-
                
                 if (lj_state.is_connected)  {
                     cbot_logger->info("disconnected from labjack");
@@ -168,29 +122,27 @@ int main(int argc, const char** argv)
                 
             }
 
-            if(ImGui::Button(lj_state.stream_on? "stop stream": "start stream"))
-            {
-                if (lj_state.stream_on) {
-                    lj_state.stream_on = false;
-                    lj_state.log_on = false;
-                    stop_streaming(&lj_state,&lj_data);                    
-                    
+            if(lj_state.is_connected) {
+                if(ImGui::Button(lj_state.pulse_on? "stop pulse": "start pulse"))
+                {
+                    if (lj_state.pulse_on) {
+                        lj_state.pulse_on = false;
+                        stop_pulsing(&lj_state);                    
+                        
 
+                    }
+                    else {
+                        lj_state.pulse_on = true;
+                        start_pulsing(&lj_state, &pulse,cbot_logger);                    
+                    }
                 }
-                else {
-                    lj_state.stream_on = true;
-                    start_streaming(&lj_state,&lj_data,camera_logger);                    
-                }
-            }
+
+                ImGui::SliderFloat("duty cycle", &duty_cycle, 0.0f, 100.0f, "%.3f");
+                ImGui::SliderFloat("fps", &fps, 1.0f, 100.0f, "%.3f");
+                
+                update_pulse(&pulse, fps, duty_cycle);
+            }    
             
-            if(!lj_state.stream_in_queue.empty())
-                LabJackStreamData in_data = lj_state.stream_in_queue.pop();
-
-          
-
-  
-            
-
             ImGui::End();
             
 

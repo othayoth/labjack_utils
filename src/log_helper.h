@@ -15,48 +15,38 @@ bool clean_exit = false;
 
 // using namespace spdlog;
 
-std::thread* lj_thread;
-std::thread* log_thread;
+std::thread* pulse_on_thread;
 
-// data structure to stream data
-struct LabJackStreamData{
-    int num_skipped_scans=0;
-    int total_skipped_scans=0;
-    int device_scan_backlog=0;
-    int lj_scan_backlog=0;
-    uint64_t us_tick=0;
-    uint64_t us_scan_start=0;
-    uint32_t counter=0;
-    double* data;    
+// pulse data structure
+struct Pulse    {
+    const double highVoltage = 5.0; // High level of the PWM signal
+    const double lowVoltage = 0.0;  // Low level of the PWM signal
+    double frequency = 60.0;        // Target frequency in Hz
+    double dutyCycle = 50.0;        // Duty cycle in percent
+
+    // Calculate high and low durations based on frequency and duty cycle
+    double period = 1.0 / frequency; // Period of the PWM signal in seconds
+    double highTime = period * (dutyCycle / 100.0); // High state duration
+    double lowTime = period - highTime; // Low state duration
+
+    // Convert durations to microseconds for usleep
+    int highTime_us = (int)(highTime * 1e6);
+    int lowTime_us = (int)(lowTime * 1e6);
+
+    uint64_t counter = 0;
 };
 
 struct LabJackState{
     // states
     bool is_connected=false;
-    bool stream_on=false;
-    bool log_on = true;
+    bool pulse_on=false;
     int handle;
-    int err;
+    int err;   
 
-    std::thread* lj_thread;
-    std::thread* log_thread;
-    
-    // scan pararmeters
-    double scan_rate = 5000;
-    int scans_per_read = (int)(scan_rate/2);
-    enum {num_channels = 1};
-    const char * channels[num_channels] = {"DIO0_EF_READ_A_AND_RESET"};    
-    int* scan_list_addresses;
-    unsigned int scan_data_size = num_channels*scans_per_read;       
-    TSQueue<LabJackStreamData> stream_in_queue;
-    
 };
 
-
-
-void lj_stream_thread(LabJackState* lj_state, LabJackStreamData* lj_stream);
-void gui_log_thread(LabJackState* lj_state, LabJackStreamData *lj_stream, std::shared_ptr<spdlog::logger> logger);
-
+void update_pulse(Pulse* pulse, double frequency, double dutyCycle);
+void pulse_on(LabJackState* lj_state, Pulse* pulse, std::shared_ptr<spdlog::logger> logger);
 
 
 void open_labjack(LabJackState* lj_state)       {
@@ -68,21 +58,9 @@ void open_labjack(LabJackState* lj_state)       {
     }
     else        {
         lj_state->is_connected=true;
-        printf("Opened connection to LabJack\n");        
-
-        lj_state->err = LJM_eWriteName(lj_state->handle, "DIO0_EF_ENABLE", 0);    
-        if(lj_state->err==LJME_NOERROR)  {printf("disabled DIO0_EF\n");}
-            
-        lj_state->err = LJM_eWriteName(lj_state->handle, "DIO0_EF_INDEX", 8);
-        if(lj_state->err==LJME_NOERROR)  {printf("set EF_INDEX to read counters\n");}
-        
-        lj_state->err = LJM_eWriteName(lj_state->handle, "DIO0_EF_ENABLE", 1);
-        if(lj_state->err==LJME_NOERROR)  {printf("enabled DIO0_EF\n");}
-        
-    
+        printf("Opened connection to LabJack\n");            
     }
 
-    // setup FIO as interrupt counter
     
 }
 
@@ -101,98 +79,59 @@ void close_labjack(LabJackState* lj_state)      {
     
 }
 
-void start_streaming(LabJackState* lj_state, LabJackStreamData* lj_stream, std::shared_ptr<spdlog::logger> camera_logger)    {
+void start_pulsing(LabJackState* lj_state, Pulse* pulse, std::shared_ptr<spdlog::logger> logger)    {
 
-    // get channel list and convert them to addresses
-    lj_state->scan_list_addresses = (int*)malloc(lj_state->num_channels*sizeof(int));
-    int err = LJM_NamesToAddresses(lj_state->num_channels, lj_state->channels, lj_state->scan_list_addresses, NULL);
-
-    // allocate memory for scan data
-    lj_stream->data = (double*)malloc(lj_state->scan_data_size*sizeof(double));
-    lj_state->err = LJM_eStreamStart(lj_state->handle, lj_state->scans_per_read, lj_state->num_channels, lj_state->scan_list_addresses, &lj_state->scan_rate);
-    if(lj_state->err!=LJME_NOERROR)   {
-        printf("Failed to start streaming\n");
-        lj_state->stream_on = false;
-        return;
-    }
-    else        {
-        lj_state->stream_on=true;
-        lj_thread = new std::thread(lj_stream_thread, lj_state, lj_stream);
-        log_thread = new std::thread(gui_log_thread, lj_state, lj_stream, camera_logger);
-        printf("Started streaming\n");
-        clean_exit = false;
-    }
+    lj_state->pulse_on = true;
+    pulse_on_thread = new std::thread(pulse_on,lj_state,pulse,logger);
+    printf("Started pulsing\n");
+    clean_exit = false;
+    
 }
 
-void stop_streaming(LabJackState* lj_state, LabJackStreamData* lj_stream)     {
+void stop_pulsing(LabJackState* lj_state)     {
     
-    lj_state->stream_on = false;
+    lj_state->pulse_on = false;
 
     while(clean_exit==false){
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
     clean_exit = false;
-    lj_thread->join();
-    log_thread->join();
-
-    lj_state->err = LJM_eStreamStop(lj_state->handle);
-    if(lj_state->err!=LJME_NOERROR)   {
-        printf("Failed to stop streaming\n");
-        return;
-    }
-    else        {       
-        lj_state->stream_on=false;
-        printf("Stopped streaming\n");
-    }
-
-    lj_stream->counter = 0;
-
+    pulse_on_thread->join();    
+    printf("Stopped pulsing\n");
     
 }
 
-void lj_stream_thread(LabJackState* lj_state, LabJackStreamData* lj_stream)
+void pulse_on(LabJackState* lj_state, Pulse* pulse, std::shared_ptr<spdlog::logger> logger)
 {
-    printf("starting lj_stream_thread\n");
-    lj_stream->us_scan_start = LJM_GetHostTick();
-    while(lj_state->stream_on)
+    printf("pulsing now\n");
+    while(lj_state->pulse_on)
     {
-        lj_stream->us_tick=LJM_GetHostTick() - lj_stream->us_scan_start;
-        lj_state->err = LJM_eStreamRead(lj_state->handle, lj_stream->data, &lj_stream->device_scan_backlog, &lj_stream->lj_scan_backlog);
-        lj_state->stream_in_queue.push(*lj_stream);
-    }
+         // Set DAC0 to high voltage
+        LJM_eWriteName(lj_state->handle, "DAC0", pulse->highVoltage);
+        logger->info("DAC0 set to high voltage");
+        std::this_thread::sleep_for(std::chrono::microseconds(pulse->highTime_us)); // Wait for high state duration
+      
+        // Set DAC0 to low voltage
+        LJM_eWriteName(lj_state->handle, "DAC0", pulse->lowVoltage);
+        logger->info("DAC0 set to low voltage");
+        std::this_thread::sleep_for(std::chrono::microseconds(pulse->lowTime_us)); // Wait for high state duration
 
-
-    free(lj_state->scan_list_addresses);
-    free(lj_stream->data);
-
-    clean_exit = true;
-
-    
-}
-
-
-void gui_log_thread(LabJackState* lj_state, LabJackStreamData *lj_stream, std::shared_ptr<spdlog::logger> logger)
-{
-
-    printf("starting gui_log_thread\n");
-    double last_data = 0;
-    while (lj_state->log_on) {
-        if (!lj_state->stream_in_queue.empty()) {
-        
-            LabJackStreamData in_data = lj_state->stream_in_queue.pop();
-        
-            for (int i = 0; i < lj_state->scan_data_size; i++) {
-                
-                if (in_data.data[i] != last_data) {
-                    lj_stream->counter++;  
-                    logger->info("tick: {0}, in_data:{1}, frames_in: {2}", in_data.us_tick, in_data.data[i], lj_stream->counter);              
-                    
-                }
-            last_data = in_data.data[i];
-            }
-        }
         logger->flush();
     }
+
+    clean_exit = true;
+    logger->info("pulse off");
+    logger->flush();
+}
+
+void update_pulse(Pulse* pulse, double frequency, double dutyCycle) {
+    pulse->frequency = frequency;
+    pulse->dutyCycle = dutyCycle;
+    pulse->period = 1.0 / pulse->frequency;
+    pulse->highTime = pulse->period * (pulse->dutyCycle / 100.0);
+    pulse->lowTime = pulse->period - pulse->highTime;
+    pulse->highTime_us = (int)(pulse->highTime * 1e6);
+    pulse->lowTime_us = (int)(pulse->lowTime * 1e6);
 }
 
 #endif
