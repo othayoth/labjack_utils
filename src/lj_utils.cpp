@@ -19,6 +19,7 @@
 #include <random>
 #include "math.h"
 
+#include <typeinfo>
 #include "log_helper.h"
 
 int handle, err;
@@ -42,53 +43,14 @@ std::string CurrentTimeStr()
 // spdlog::set_pattern("[%H_%M_%S_%z] [%n] [%^---%L---%$] [thread %t] %v");
 // spdlog::set_pattern("[%Y_%m_%d_%H_%M_%S_%f_%z] [%n] [%^---%L---%$] [thread %t] %v");
 // spdlog::init_thread_pool(8192, 1);
-auto camera_logger = spdlog::basic_logger_mt<spdlog::async_factory>("camera_logger", "logs/async_log.txt");
-auto cbot_logger = spdlog::basic_logger_mt<spdlog::async_factory>("cbot_logger", "logs/async_log.txt");
-
-// utility structure for realtime plot
-struct ScrollingBuffer {
-    int MaxSize;
-    int Offset;
-    ImVector<ImVec2> Data;
-    ScrollingBuffer(int max_size = 2000) {
-        MaxSize = max_size;
-        Offset  = 0;
-        Data.reserve(MaxSize);
-    }
-    void AddPoint(float x, float y) {
-        if (Data.size() < MaxSize)
-            Data.push_back(ImVec2(x,y));
-        else {
-            Data[Offset] = ImVec2(x,y);
-            Offset =  (Offset + 1) % MaxSize;
-        }
-    }
-    void Erase() {
-        if (Data.size() > 0) {
-            Data.shrink(0);
-            Offset  = 0;
-        }
-    }
-};
-
-struct RollingBuffer {
-    float Span;
-    ImVector<ImVec2> Data;
-    RollingBuffer() {
-        Span = 10.0f;
-        Data.reserve(2000);
-    }
-    void AddPoint(float x, float y) {
-        float xmod = fmodf(x, Span);
-        if (!Data.empty() && xmod < Data.back().x)
-            Data.shrink(0);
-        Data.push_back(ImVec2(xmod, y));
-    }
-};
+// auto pattern = std::make_shared<spdlog::set_pattern("[%Y-%m-%d %H:%M:%S] [%l] %v")>;
+// auto async_sink = std::make_shared<spdlog ("logs/async_log.txt", true);
+auto camera_logger = spdlog::basic_logger_mt<spdlog::async_factory>("camera_logger", "logs/test_async_log.txt");
+auto cbot_logger = spdlog::basic_logger_mt<spdlog::async_factory>("cbot_gui", "logs/test_async_log.txt");
 
 
-static ScrollingBuffer sdata1;
-static RollingBuffer   rdata1;
+
+
 static float history = 10.0f;
 long int t_start = 0;
                         
@@ -102,6 +64,11 @@ LabJackStreamData lj_local;
 // Main code
 int main(int argc, const char** argv)
 {
+    // std::cout<<"type of camera_logger: "<<typeid(camera_logger).name()<<std::endl;
+    // See this link for custom formatting: 
+    // https://github.com/gabime/spdlog/wiki/3.-Custom-formatting
+    spdlog::set_pattern("%Y_%m_%d_%H_%M_%S_%e,  %n, %l, %v");
+
     printf("started cbot\n");
     printf(CURRENT_TIME_STR);
     printf("\n");
