@@ -9,6 +9,7 @@
 #include "IconsForkAwesome.h"
 #include "utility.h"
 #include <chrono>
+#include <ctime>
 #include <string.h>
 #include "imgui.h"
 #include "imgui_internal.h"
@@ -30,23 +31,21 @@ long int us; // Microseconds
 const float button_width = 400.0f;
 
 
-// A nice way of printing out the system time
-std::string CurrentTimeStr()
-{
+// A nice way of printing out the formatted system time
+char* getCurrentTimeFormatted() {
     time_t now = time(NULL);
-    return std::string(ctime(&now));
+    struct tm *tm_now = localtime(&now);
+
+    static char formatted_time[40]; // Buffer to hold the formatted time
+    strftime(formatted_time, sizeof(formatted_time), "logs/cbot_log_%Y_%m_%d_%H_%M_%S.txt", tm_now);
+
+    return formatted_time;
 }
-#define CURRENT_TIME_STR CurrentTimeStr().c_str()
 
 
-// auto logger = spdlog::basic_logger_mt("basic_logger", "logs/basic_log.txt");
-// spdlog::set_pattern("[%H_%M_%S_%z] [%n] [%^---%L---%$] [thread %t] %v");
-// spdlog::set_pattern("[%Y_%m_%d_%H_%M_%S_%f_%z] [%n] [%^---%L---%$] [thread %t] %v");
-// spdlog::init_thread_pool(8192, 1);
-// auto pattern = std::make_shared<spdlog::set_pattern("[%Y-%m-%d %H:%M:%S] [%l] %v")>;
-// auto async_sink = std::make_shared<spdlog ("logs/async_log.txt", true);
-auto camera_logger = spdlog::basic_logger_mt<spdlog::async_factory>("camera_logger", "logs/test_async_log.txt");
-auto cbot_logger = spdlog::basic_logger_mt<spdlog::async_factory>("cbot_gui", "logs/test_async_log.txt");
+std::string log_file = std::string(getCurrentTimeFormatted());
+auto camera_logger = spdlog::basic_logger_mt<spdlog::async_factory>("camera_logger", log_file);
+auto cbot_logger = spdlog::basic_logger_mt<spdlog::async_factory>("cbot_gui", log_file);
 
 
 
@@ -70,7 +69,7 @@ int main(int argc, const char** argv)
     spdlog::set_pattern("%Y_%m_%d_%H_%M_%S_%e,  %n, %l, %v");
 
     printf("started cbot\n");
-    printf(CURRENT_TIME_STR);
+    printf(getCurrentTimeFormatted());
     printf("\n");
     cbot_logger->info("starting cbot");
 
